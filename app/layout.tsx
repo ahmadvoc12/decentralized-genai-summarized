@@ -14,6 +14,8 @@ import '@/styles/Contact.css';
 import '@/styles/Plugins.css';
 import '@/styles/MiniCalendar.css';
 import AppWrappers from './AppWrappers';
+import { Analytics } from '@vercel/analytics/next';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 
 import { SolidSessionProvider, useSolidSession } from '@/contexts/SolidSessionContext';
 import { ChatSessionProvider, useChatSession } from '@/contexts/ChatSessionContext';
@@ -48,6 +50,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </SolidSessionProvider>
           </ChakraProvider>
         </AppWrappers>
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
