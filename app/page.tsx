@@ -49,26 +49,28 @@ const {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
   const toast = useToast();
-  const { session, isLoggedIn } = useSolidSession();
+  const { session, isLoggedIn, loading: authLoading } = useSolidSession();
 
-const getModelFromProvider = (provider: string): string => {
-  const modelMap: Record<string, string> = {
-    openai: 'gpt-3.5-turbo',
-    deepseek: 'deepseek-ai/DeepSeek-V3',
-    llama: 'meta-llama/Llama-3-70B-Instruct-Turbo',
-    llama33: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
-    kimi: 'moonshotai/Kimi-K2-Instruct',
-    qwen: 'Qwen/Qwen3-235B-A22B-fp8-tput',
+  const getModelFromProvider = (provider: string): string => {
+    const modelMap: Record<string, string> = {
+      openai: 'openai/gpt-4o',
+      deepseek: 'deepseek/deepseek-chat',
+      llama: 'meta-llama/llama-3.3-70b-instruct',
+      llama33: 'meta-llama/llama-3.3-70b-instruct',
+      kimi: 'moonshotai/kimi-k2',
+      qwen: 'qwen/qwen-2.5-72b-instruct',
+      gemini: 'google/gemini-2.5-flash',
+    };
 
+    return modelMap[provider] || 'google/gemini-2.5-flash';
   };
-
-  return modelMap[provider] || 'gpt-3.5-turbo';
-};
   const model = getModelFromProvider(selectedLLM);
 
   useEffect(() => {
-    if (!isLoggedIn) router.replace('/sign-in');
-  }, [isLoggedIn, router]);
+    if (!authLoading && !isLoggedIn) {
+      router.replace('/sign-in');
+    }
+  }, [isLoggedIn, authLoading, router]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -396,7 +398,14 @@ const fullMessages = isMathMCP
 
    toast({
   title: 'Success',
-  description: `Received response from ${selectedLLM === 'openai' ? 'ChatGPT' : selectedLLM === 'deepseek' ? 'DeepSeek' : selectedLLM === 'llama' ? 'LLama' : 'LLM'}.`,
+  description: `Received response from ${
+    selectedLLM === 'openai' ? 'ChatGPT' :
+    selectedLLM === 'deepseek' ? 'DeepSeek' :
+    selectedLLM === 'llama' || selectedLLM === 'llama33' ? 'LLaMA 3.3' :
+    selectedLLM === 'kimi' ? 'Kimi' :
+    selectedLLM === 'qwen' ? 'Qwen' :
+    selectedLLM === 'gemini' ? 'Gemini' : 'LLM'
+  }.`,
   status: 'success',
   duration: 3000,
   isClosable: true,
@@ -456,6 +465,14 @@ const saveMessageToSolidPod = async (
     setShowPermissionDialog(false);
   };
 
+  if (authLoading || !isLoggedIn) {
+    return (
+      <Flex h="100vh" w="100%" align="center" justify="center" direction="column" gap={4}>
+        <Spinner size="xl" color="teal.500" thickness="4px" />
+        <Text fontSize="sm" color="gray.500">Checking authentication...</Text>
+      </Flex>
+    );
+  }
 
   return (
     <Box maxW="4xl" mx="auto" py={10} px={4} h="100vh" display="flex" flexDir="column">

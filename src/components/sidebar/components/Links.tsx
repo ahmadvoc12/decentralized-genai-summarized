@@ -193,6 +193,7 @@ export function SidebarLinks({ routes, loadMessagesFromSolidPod }: SidebarLinksP
             <option value="llama33">LLaMA 3.3</option>
             <option value="kimi">Kimi</option>
             <option value="qwen">Qwen</option>
+            <option value="gemini">Gemini</option>
           </Select>
         </Flex>
 

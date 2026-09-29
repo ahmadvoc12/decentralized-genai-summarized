@@ -17,6 +17,7 @@ import {
 interface SolidSessionContextType {
   session: Session;
   isLoggedIn: boolean;
+  loading: boolean;
   login: (options: {
     oidcIssuer: string;
     clientId: string;
@@ -37,11 +38,16 @@ export function SolidSessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     async function init() {
-      await handleIncomingRedirect({ restorePreviousSession: true });
-      const sess = getDefaultSession();
-      setSession(sess);
-      setIsLoggedIn(sess.info.isLoggedIn);
-      setLoading(false);
+      try {
+        await handleIncomingRedirect({ restorePreviousSession: true });
+      } catch (err) {
+        console.warn('⚠️ Solid Session handleIncomingRedirect error:', err);
+      } finally {
+        const sess = getDefaultSession();
+        setSession(sess);
+        setIsLoggedIn(sess.info.isLoggedIn);
+        setLoading(false);
+      }
     }
     init();
   }, []);
@@ -66,13 +72,9 @@ export function SolidSessionProvider({ children }: { children: ReactNode }) {
     localStorage.clear();
   };
 
-  if (loading) {
-    return <div>Loading authentication...</div>;
-  }
-
   return (
     <SolidSessionContext.Provider
-      value={{ session, isLoggedIn, login, logout }}
+      value={{ session, isLoggedIn, loading, login, logout }}
     >
       {children}
     </SolidSessionContext.Provider>
@@ -89,6 +91,7 @@ export function useSolidSession(): SolidSessionContextType {
       return {
         session: getDefaultSession(),
         isLoggedIn: false,
+        loading: false,
         login: async () => {},
         logout: async () => {},
       };
@@ -101,6 +104,7 @@ export function useSolidSession(): SolidSessionContextType {
     return {
       session: getDefaultSession(),
       isLoggedIn: false,
+      loading: false,
       login: async () => {},
       logout: async () => {},
     };

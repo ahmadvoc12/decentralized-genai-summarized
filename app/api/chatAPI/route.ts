@@ -1,104 +1,83 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Together } from 'together-ai';
+import { applySystemPromptLayer } from '@/utils/systemPromptLayer';
 
 export const runtime = 'edge';
 
-const OPENAI_API_KEY = 'YOUR-OPENAI-KEY';
-const TOGETHER_API_KEY = 'YOUR-TOGETHER-AI-KEY / ANOTHER API KEY';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 
-const together = new Together({ apiKey: TOGETHER_API_KEY });
+const modelMap: Record<string, string> = {
+  openai: 'openai/gpt-4o',
+  deepseek: 'deepseek/deepseek-chat',
+  llama: 'meta-llama/llama-3.3-70b-instruct',
+  llama33: 'meta-llama/llama-3.3-70b-instruct',
+  kimi: 'moonshotai/kimi-k2',
+  qwen: 'qwen/qwen-2.5-72b-instruct',
+  gemini: 'google/gemini-2.5-flash',
+};
 
 export async function POST(req: NextRequest) {
   try {
+    if (!OPENROUTER_API_KEY) {
+      return new NextResponse('OPENROUTER_API_KEY is missing in environment variables.', {
+        status: 500,
+      });
+    }
+
     const body = await req.json();
     const { messages, model, stream = false, provider } = body;
 
-    if (!messages || !provider) {
-      return new NextResponse('Missing messages or provider', { status: 400 });
+    if (!messages) {
+      return new NextResponse('Missing messages', { status: 400 });
+    }
+    let targetModel = modelMap[provider] || model || 'google/gemini-2.5-flash';
+    if (model && model.includes('/')) {
+      targetModel = model;
     }
 
-    // === OPENAI ===
-    if (provider === 'openai') {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: model || 'gpt-3.5-turbo',
-          messages,
-          stream,
-        }),
+    const alignedMessages = applySystemPromptLayer(messages);
+    const origin = req.headers.get('origin');
+    const host = req.headers.get('host');
+    const proto = req.headers.get('x-forwarded-proto') || 'http';
+    const siteUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      origin ||
+      (host ? `${proto}://${host}` : '');
+
+    const openRouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': siteUrl,
+        'X-Title': 'Decentralized GenAI Summarized',
+      },
+      body: JSON.stringify({
+        model: targetModel,
+        messages: alignedMessages,
+        stream,
+        max_tokens: 2048,
+      }),
+    });
+
+    if (!openRouterResponse.ok || !openRouterResponse.body) {
+      const errText = await openRouterResponse.text();
+      return new NextResponse(`OpenRouter Error (${openRouterResponse.status}): ${errText}`, {
+        status: openRouterResponse.status,
       });
-
-      if (!response.ok || !response.body) {
-        const errText = await response.text();
-        return new NextResponse(`OpenAI Error: ${errText}`, {
-          status: response.status,
-        });
-      }
-
-      return stream
-        ? new NextResponse(response.body, {
-            status: 200,
-            headers: { 'Content-Type': 'text/event-stream' },
-          })
-        : NextResponse.json(await response.json());
-    }
-
-    // === TOGETHER AI ===
-    const modelMap: Record<string, string> = {
-      deepseek: 'deepseek-ai/DeepSeek-V3',
-      llama: 'meta-llama/Llama-3-70B-Instruct-Turbo',
-      llama33: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
-      kimi: 'moonshotai/Kimi-K2-Instruct',
-      qwen: 'Qwen/Qwen3-235B-A22B-fp8-tput',
-      gemma: 'your-custom-endpoint-url',
-    };
-
-    const togetherModel = modelMap[provider];
-    if (!togetherModel) {
-      return new NextResponse('Unsupported provider', { status: 400 });
     }
 
     if (stream) {
-      const response = await together.chat.completions.create({
-        model: togetherModel,
-        messages,
-        stream: true,
-      });
-
-      const { readable, writable } = new TransformStream();
-      const writer = writable.getWriter();
-      const encoder = new TextEncoder();
-
-      (async () => {
-        for await (const chunk of response) {
-          const content = chunk.choices?.[0]?.delta?.content || '';
-          if (content) {
-            writer.write(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`));
-          }
-        }
-        writer.write(encoder.encode('data: [DONE]\n\n'));
-        writer.close();
-      })();
-
-      return new NextResponse(readable, {
+      return new NextResponse(openRouterResponse.body, {
         status: 200,
         headers: {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
         },
       });
     } else {
-      const response = await together.chat.completions.create({
-        model: togetherModel,
-        messages,
-        stream: false,
-      });
-
-      return NextResponse.json(response);
+      const data = await openRouterResponse.json();
+      return NextResponse.json(data);
     }
   } catch (err: any) {
     return new NextResponse(`Internal Error: ${err.message}`, { status: 500 });

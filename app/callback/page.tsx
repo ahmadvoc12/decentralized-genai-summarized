@@ -2,18 +2,27 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { handleIncomingRedirect } from '@inrupt/solid-client-authn-browser';
+import { useSolidSession } from '@/contexts/SolidSessionContext';
+import { Flex, Spinner, Text } from '@chakra-ui/react';
 
 export default function CallbackPage() {
   const router = useRouter();
+  const { isLoggedIn, loading } = useSolidSession();
 
   useEffect(() => {
-    async function completeLogin() {
-      await handleIncomingRedirect({ restorePreviousSession: true });
-      router.replace('/');
+    if (!loading) {
+      if (isLoggedIn) {
+        router.replace('/');
+      } else {
+        router.replace('/sign-in');
+      }
     }
-    completeLogin();
-  }, [router]);
+  }, [isLoggedIn, loading, router]);
 
-  return <div>Loading...</div>;
+  return (
+    <Flex h="100vh" w="100%" align="center" justify="center" direction="column" gap={4}>
+      <Spinner size="xl" color="teal.500" thickness="4px" />
+      <Text fontSize="sm" color="gray.500">Completing authentication...</Text>
+    </Flex>
+  );
 }

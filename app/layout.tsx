@@ -15,8 +15,8 @@ import '@/styles/Plugins.css';
 import '@/styles/MiniCalendar.css';
 import AppWrappers from './AppWrappers';
 
-import { SolidSessionProvider } from '@/contexts/SolidSessionContext';
-import { ChatSessionProvider } from '@/contexts/ChatSessionContext';
+import { SolidSessionProvider, useSolidSession } from '@/contexts/SolidSessionContext';
+import { ChatSessionProvider, useChatSession } from '@/contexts/ChatSessionContext';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -64,8 +64,8 @@ function MainLayout({
   const pathname = usePathname();
   const { isOpen, onOpen } = useDisclosure();
 
-  const { session } = require('@/contexts/SolidSessionContext').useSolidSession();
-  const { setAllMessages, setSessionMessages } = require('@/contexts/ChatSessionContext').useChatSession();
+  const { session } = useSolidSession();
+  const { setAllMessages, setSessionMessages } = useChatSession();
 
   const loadMessagesFromSolidPod = async (filename: string) => {
     try {
