@@ -53,7 +53,6 @@ const {
 
   const getModelFromProvider = (provider: string): string => {
     const modelMap: Record<string, string> = {
-      openai: 'openai/gpt-4o',
       deepseek: 'deepseek/deepseek-chat',
       llama: 'meta-llama/llama-3.3-70b-instruct',
       llama33: 'meta-llama/llama-3.3-70b-instruct',

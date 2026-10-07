@@ -188,12 +188,10 @@ export function SidebarLinks({ routes, loadMessagesFromSolidPod }: SidebarLinksP
       <Box px="20px" mt="10px">
         <Flex mb={4} gap={4} align="center">
           <Select value={selectedLLM} onChange={(e) => setSelectedLLM(e.target.value)} w="100%">
-            <option value="openai">ChatGPT</option>
             <option value="deepseek">DeepSeek</option>
             <option value="llama33">LLaMA 3.3</option>
             <option value="kimi">Kimi</option>
             <option value="qwen">Qwen</option>
-            <option value="gemini">Gemini</option>
           </Select>
         </Flex>
 

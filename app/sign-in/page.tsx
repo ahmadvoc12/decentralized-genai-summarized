@@ -24,14 +24,18 @@ export default function SolidLoginPage() {
   const router = useRouter();
   const toast = useToast();
 
+  // 1. Redirect otomatis jika sudah login
   useEffect(() => {
     if (isLoggedIn) {
+      console.log('[Sign-In] ✅ User sudah login, redirecting ke home...');
+      // Next.js router otomatis menangani basePath jika dikonfigurasi di next.config.js
       router.replace('/');
     }
   }, [isLoggedIn, router]);
 
+  // 2. Set default Identity Provider
   useEffect(() => {
-    setIdp('https://login.inrupt.com'); // Default OIDC Issuer
+    setIdp('https://login.inrupt.com');
   }, []);
 
   async function handleLogin() {
@@ -48,13 +52,33 @@ export default function SolidLoginPage() {
 
     setLoading(true);
     try {
-      const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+      // 3. Logika BasePath yang Aman untuk Local & Production
+      const rawBasePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+      // Pastikan tidak ada double slash. Jika kosong, biarkan kosong.
+      const cleanBasePath = rawBasePath === '' ? '' : (rawBasePath.startsWith('/') ? rawBasePath : `/${rawBasePath}`);
+      
+      // 4. Konstruksi URL Redirect yang Presisi
+      const finalRedirectUrl = `${window.location.origin}${cleanBasePath}/callback`;
+      
+      // 5. Logging untuk Debugging (Sangat Penting!)
+      console.log('=========================================');
+      console.log('[Sign-In] 🔑 Attempting Solid Login...');
+      console.log('[Sign-In] 🌐 Window Origin:', window.location.origin);
+      console.log('[Sign-In] 📁 BasePath:', cleanBasePath || '(kosong/root)');
+      console.log('[Sign-In] 🎯 Final Redirect URL:', finalRedirectUrl);
+      console.log('=========================================');
+
       await session.login({
         oidcIssuer: idp,
-        redirectUrl: window.location.origin + basePath + '/callback',
-        clientName: 'Chat UI',
+        redirectUrl: finalRedirectUrl,
+        clientName: 'DIKE-Chat', // Nama client yang jelas
+        // prompt: 'consent', // <-- HAPUS KOMENTAR INI jika Anda ingin memaksa layar izin Solid Provider muncul lagi
       });
+      
+      // Catatan: Setelah session.login() berhasil, halaman akan di-redirect 
+      // ke Solid Provider, lalu kembali ke URL redirectUrl di atas.
     } catch (error: any) {
+      console.error('[Sign-In] ❌ Login error:', error);
       toast({
         title: 'Login Failed',
         description: error.message || 'An error occurred during login',
@@ -86,33 +110,14 @@ export default function SolidLoginPage() {
           width="full"
           onClick={handleLogin}
           isLoading={loading}
-          loadingText="Connecting..."
+          loadingText="Connecting to Solid..."
         >
           Login
         </Button>
       </Box>
 
-      {/* 2. Testing Guidelines */}
-      <Box w="full" maxW="md" p="6" borderWidth="1px" borderRadius="md" boxShadow="sm" bg="gray.50">
-        <Heading mb="4" textAlign="center" size="sm" color="gray.700">
-          📋 DIKE-Chat Guide
-        </Heading>
-        <UnorderedList spacing={3} color="gray.700" fontSize="sm">
-          <ListItem>
-            Access the DIKE-Chat site via this link: <Link color="blue.600" fontWeight="medium" href="http://31.97.190.72/dikechat/" isExternal>http://31.97.190.72/dikechat/</Link> (use incognito mode if necessary).
-          </ListItem>
-          <ListItem>Click the <strong>Sign Up</strong> button to create an account.</ListItem>
-          <ListItem>Fill out the registration form with your details.</ListItem>
-          <ListItem>Open your email and verify your account via the provided link.</ListItem>
-          <ListItem>After verification is complete, return to the DIKE-Chat page and click <strong>Continue</strong> to proceed to login.</ListItem>
-          <ListItem>Before logging into DIKE-Chat, visit <Link color="blue.600" fontWeight="medium" href="https://id.inrupt.com/" isExternal>https://id.inrupt.com/</Link></ListItem>
-          <ListItem>Log in using your verified account.</ListItem>
-          <ListItem>Click the <strong>Get a Pod</strong> button to get access to your personal data storage.</ListItem>
-          <ListItem>Return to the DIKE-Chat page and log in again.</ListItem>
-          <ListItem>Once inside DIKE-Chat, click the <strong>New Chat</strong> button to start a conversation.</ListItem>
-          <ListItem>Use the <strong>DeepSeek</strong> and <strong>Qwen</strong> LLMs alternately (use the LLM switch feature on the platform).</ListItem>
-        </UnorderedList>
-      </Box>
+      {/* 2. Panduan Testing Lokal */}
+
 
     </VStack>
   );
