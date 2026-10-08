@@ -2,7 +2,7 @@
 'use client';
 
 import {
-  Box, Button, Input, useToast, Spinner, Flex, Text, Avatar,
+  Box, Button, Input, useToast, Spinner, Flex, Text, Avatar, Select,
   AlertDialog, AlertDialogOverlay, AlertDialogContent,
   AlertDialogHeader, AlertDialogBody, AlertDialogFooter
 } from '@chakra-ui/react';
@@ -11,15 +11,17 @@ import { useEffect, useRef, useState } from 'react';
 import { useSolidSession } from '@/contexts/SolidSessionContext';
 import { createParser } from 'eventsource-parser';
 import {
-  getSolidDataset, getThingAll, getStringNoLocale, getUrl, getDatetime,
+  getSolidDataset, getThingAll, getStringNoLocale, getUrl, getDatetime, // ✅ TAMBAHAN: getUrl & getDatetime untuk parsing RDF yang benar
   saveSolidDatasetAt, setThing, createThing, buildThing,
-  createSolidDataset, getPodUrlAll, createContainerAt, getResourceInfo
+  setStringNoLocale, createSolidDataset, getPodUrlAll,
+  createContainerAt, getResourceInfo, getContainedResourceUrlAll
 } from '@inrupt/solid-client';
+import { RDF, SCHEMA_INRUPT, DCTERMS } from '@inrupt/vocab-common-rdf';
 import { v4 as uuidv4 } from 'uuid';
 import { asUrl } from '@inrupt/solid-client';
 import { useChatSession } from '@/contexts/ChatSessionContext';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+
+// ✅ DIHAPUS: SCHEMA_ABOUT tidak lagi digunakan karena disalahgunakan untuk role (sesuai revisi reviewer)
 
 interface Message {
   id?: string;
@@ -39,9 +41,12 @@ export default function ChatPage() {
 
   const [loading, setLoading] = useState(false);
   const { solidPermissionGranted, setSolidPermissionGranted } = useChatSession();
+
   const [showPermissionDialog, setShowPermissionDialog] = useState(false);
-  
-  const cancelRef = useRef<HTMLButtonElement>(null);
+  const [showLLMDialog, setShowLLMDialog] = useState(true);
+  const { selectedLLM, setSelectedLLM } = useChatSession(); // ✅ DIPERTAHANKAN agar tidak error "Cannot find name"
+ 
+  const cancelRef = useRef(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
   const toast = useToast();
@@ -49,14 +54,14 @@ export default function ChatPage() {
 
   const getModelFromProvider = (provider: string): string => {
     const modelMap: Record<string, string> = {
-      deepseek: 'deepseek/deepseek-chat:free',
-      llama: 'meta-llama/llama-3.3-70b-instruct:free',
-      llama33: 'meta-llama/llama-3.3-70b-instruct:free',
-      kimi: 'mistralai/mistral-7b-instruct:free',
-      qwen: 'qwen/qwen-2.5-72b-instruct:free',
-      gemini: 'google/gemini-flash-1.5:free',
+      deepseek: 'deepseek/deepseek-chat',
+      llama: 'meta-llama/llama-3.3-70b-instruct',
+      llama33: 'meta-llama/llama-3.3-70b-instruct',
+      kimi: 'moonshotai/kimi-k2',
+      qwen: 'qwen/qwen-2.5-72b-instruct',
+      gemini: 'google/gemini-2.5-flash',
     };
-    return modelMap[provider] || 'qwen/qwen-2.5-72b-instruct:free';
+    return modelMap[provider] || 'google/gemini-2.5-flash';
   };
   const model = getModelFromProvider(selectedLLM);
 
@@ -78,10 +83,9 @@ export default function ChatPage() {
           if (!podUrls.length) {
             const fallback = session.info.webId!.replace('/profile/card#me', '/');
             podUrls = [fallback];
+            console.warn('⚠️ No solid:storage found, using fallback:', fallback);
           }
           const storage = podUrls[0];
-          
-          // ✅ REVIEWER FIX 1: Strictly use PRIVATE container, not public
           await ensureChatFolderExists(storage);
           await loadChatSessions(storage);
 
@@ -107,11 +111,12 @@ export default function ChatPage() {
   }, [isLoggedIn, session]);
 
   const ensureChatFolderExists = async (storageRoot: string) => {
-    // ✅ REVIEWER FIX 1: Path diubah ke private/ untuk menjamin privasi (ACL default Solid memblokir publik)
+    // ✅ REVIEWER FIX 1: Menggunakan 'private/' bukan 'public/' untuk menjamin privasi (ACL default Solid memblokir publik)
     const chatFolderUrl = `${storageRoot}private/llm-solid-chat/`;
 
     try {
       await getResourceInfo(chatFolderUrl, { fetch: session.fetch });
+      console.log('📁 Chat folder already exists:', chatFolderUrl);
     } catch {
       try {
         await session.fetch(chatFolderUrl, {
@@ -123,8 +128,9 @@ export default function ChatPage() {
           },
           body: ""
         });
+        console.log("📁 Chat folder created via PUT:", chatFolderUrl);
       } catch (err) {
-        console.error("❌ Failed to create private chat folder:", err);
+        console.error("❌ Failed to create chat folder:", err);
       }
     }
   };
@@ -141,6 +147,7 @@ export default function ChatPage() {
         .filter((name) => name.endsWith('.ttl'));
 
       setSessionsList(sessions);
+
       if (sessions.length) {
         setCurrentSession(sessions[0]);
         await loadMessagesFromSolidPod(sessions[0]);
@@ -171,18 +178,23 @@ export default function ChatPage() {
       const dataset = await getSolidDataset(chatFileUrl, { fetch: session.fetch });
       const things = getThingAll(dataset);
 
-      // ✅ REVIEWER FIX 4 & 5: Parsing RDF yang benar (getDatetime untuk xsd:dateTime, getUrl untuk IRI)
       const parsedMessages = things.map((thing) => {
-        const content = getStringNoLocale(thing, 'http://schema.org/text');
-        const created = getDatetime(thing, 'http://purl.org/dc/terms/created');
-        const id = getStringNoLocale(thing, 'http://purl.org/dc/terms/identifier');
+        const content = getStringNoLocale(thing, SCHEMA_INRUPT.text);
+        const id = getStringNoLocale(thing, DCTERMS.identifier);
+        
+        // ✅ REVIEWER FIX: Baca timestamp sebagai Datetime dan atribusi sebagai URL (IRI)
+        const created = getDatetime(thing, DCTERMS.created);
         const attributedTo = getUrl(thing, 'http://www.w3.org/ns/prov#wasAttributedTo');
 
-        // Tentukan role berdasarkan apakah IRI atribusi cocok dengan WebID user
+        // Tentukan role: jika IRI atribusi cocok dengan WebID user, maka 'user', jika tidak maka 'assistant'
         let role: 'user' | 'assistant' = 'assistant';
         if (attributedTo === session.info.webId) {
           role = 'user';
         }
+
+        const chatWith = getStringNoLocale(thing, 'https://schema.org/chatWith');
+        const modelVersion = getStringNoLocale(thing, 'https://schema.org/modelVersion');
+        const sessionPairId = getStringNoLocale(thing, 'https://schema.org/sessionPairId');
 
         if (content && id) {
           return {
@@ -190,9 +202,17 @@ export default function ChatPage() {
             role,
             content,
             created: created ? created.getTime() : Date.now(),
+            chatWith,
+            modelVersion,
+            sessionPairId,
           };
         }
-      }).filter(Boolean) as (Message & { created: number })[];
+      }).filter(Boolean) as (Message & {
+        created: number;
+        chatWith?: string;
+        modelVersion?: string;
+        sessionPairId?: string;
+      })[];
 
       parsedMessages.sort((a, b) => a.created - b.created);
       const messages = parsedMessages.map(({ id, role, content }) => ({
@@ -203,10 +223,69 @@ export default function ChatPage() {
 
       setAllMessages(messages);
       setSessionMessages(messages);
+      await sendContextToLLM(messages);
     } catch (err) {
       console.warn('⚠️ Could not load messages from Solid Pod:', err);
     }
   };
+
+  const sendContextToLLM = async (messages: Message[]) => {
+    const agentPrompt = (() => {
+      switch (selectedAgent) {
+        case 'math':
+          return 'You are a calculator. Answer with numeric logic only.';
+        default:
+          return 'You are a helpful assistant.';
+      }
+    })();
+
+    const contextMessages = [
+      { role: 'system', content: agentPrompt },
+      ...messages.map((msg) => ({ role: msg.role, content: msg.content })),
+    ];
+
+    try {
+      const res = await fetch('/api/chatAPI', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: contextMessages,
+          model,
+          stream: false,
+          provider: selectedLLM,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`Failed to send context to LLM. Status: ${res.status}`);
+    } catch (err) {
+      console.warn('❗ Gagal mengirim context ke LLM:', err);
+    }
+  };
+
+  function isMathExpression(input: string): boolean {
+    return /^[0-9\s\+\-\*\/\.\(\)]+$/.test(input.trim());
+  }
+
+  function getAgentPrompt(agent: string): string {
+    switch (agent) {
+      case 'weather':
+        return 'You are a weather forecaster. Only provide weather updates.';
+      case 'animal':
+        return 'You are a zoologist. Only talk about animals.';
+      default:
+        return 'You are a helpful assistant.';
+    }
+  }
+
+  function getContextMessages(agent: string, messages: Message[]): any[] {
+    if (agent === 'math') {
+      return messages.map((msg) => ({ role: msg.role, content: msg.content }));
+    }
+    return [
+      { role: 'system', content: getAgentPrompt(agent) },
+      ...messages.map((msg) => ({ role: msg.role, content: msg.content })),
+    ];
+  }
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || !currentSession) {
@@ -215,33 +294,55 @@ export default function ChatPage() {
     }
 
     const userMessage: Message = { id: uuidv4(), role: 'user', content: inputMessage };
-    const currentInput = inputMessage;
-    
-    // ✅ FIX: Gunakan functional update agar pesan tidak hilang/tertimpa
-    setSessionMessages((prev) => [
-      ...prev,
-      { id: userMessage.id || uuidv4(), role: userMessage.role, content: userMessage.content }
+
+    let agentPrompt = '';
+    switch (selectedAgent) {
+      case 'math': agentPrompt = 'You are a calculator. Answer with numeric logic only.'; break;
+      default: agentPrompt = 'You are a helpful assistant.';
+    }
+    const isMathMCP = selectedAgent === 'math' && isMathExpression(inputMessage);
+
+    const fullMessages = isMathMCP
+      ? [
+          ...sessionMessages.map(({ role, content }) => ({ role, content })),
+          { role: 'user', content: inputMessage },
+        ]
+      : [
+          { role: 'system', content: getAgentPrompt(selectedAgent) },
+          ...sessionMessages.map(({ role, content }) => ({ role, content })),
+          { role: 'user', content: inputMessage },
+        ];
+
+    setSessionMessages([
+      ...sessionMessages,
+      {
+        id: userMessage.id || uuidv4(),
+        role: userMessage.role,
+        content: userMessage.content,
+      },
     ]);
     setInputMessage('');
 
     if (session && isLoggedIn && solidPermissionGranted) {
-      await saveMessageToSolidPod(userMessage, { modelVersion: model, sessionPairId: currentSession });
+      await saveMessageToSolidPod(userMessage, {
+        chatWith: selectedAgent,
+        modelVersion: model,
+        sessionPairId: currentSession,
+      });
     }
 
     setLoading(true);
-    const agentPrompt = selectedAgent === 'math' ? 'You are a calculator. Answer with numeric logic only.' : 'You are a helpful assistant.';
-    
-    const fullMessages = [
-      { role: 'system', content: agentPrompt },
-      ...sessionMessages.map(({ role, content }) => ({ role, content })),
-      { role: 'user', content: currentInput },
-    ];
 
     try {
       const res = await fetch('/api/chatAPI', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: fullMessages, stream: true, model, provider: selectedLLM }),
+        body: JSON.stringify({
+          messages: fullMessages,
+          stream: true,
+          model,
+          provider: selectedLLM,
+        }),
       });
 
       if (!res.ok || !res.body) throw new Error(`HTTP error! status: ${res.status}`);
@@ -261,12 +362,14 @@ export default function ChatPage() {
             const content = parsed.choices[0]?.delta?.content || '';
             if (content) {
               assistantMessageContent += content;
+
               setSessionMessages((prev) => {
                 const updated = [...prev];
                 const last = updated.find((msg) => msg.id === assistantId);
                 if (last) last.content += content;
-                return updated;
+                return [...updated];
               });
+
               if (solidPermissionGranted === null) setShowPermissionDialog(true);
             }
           } catch (e) {
@@ -284,24 +387,42 @@ export default function ChatPage() {
       if (session && isLoggedIn && solidPermissionGranted) {
         await saveMessageToSolidPod(
           { id: assistantId, role: 'assistant', content: assistantMessageContent },
-          { modelVersion: model, sessionPairId: currentSession }
+          {
+            chatWith: selectedAgent,
+            modelVersion: model,
+            sessionPairId: currentSession,
+          }
         );
       }
 
-      toast({ title: 'Success', description: `Received response from ${selectedLLM}.`, status: 'success', duration: 3000, isClosable: true });
+      toast({
+        title: 'Success',
+        description: `Received response from ${
+          selectedLLM === 'openai' ? 'ChatGPT' :
+          selectedLLM === 'deepseek' ? 'DeepSeek' :
+          selectedLLM === 'llama' || selectedLLM === 'llama33' ? 'LLaMA 3.3' :
+          selectedLLM === 'kimi' ? 'Kimi' :
+          selectedLLM === 'qwen' ? 'Qwen' :
+          selectedLLM === 'gemini' ? 'Gemini' : 'LLM'
+        }.`,
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      });
 
     } catch (err: any) {
       console.error('Error during fetch:', err);
       setSessionMessages((prev) => prev.slice(0, -1));
+
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ REVIEWER FIX 2, 3, 4, 5: Perbaikan Pemodelan RDF secara Lengkap
+  // ✅ REVIEWER FIX: Perbaikan Pemodelan RDF secara Lengkap
   const saveMessageToSolidPod = async (
     msg: Message,
-    metadata?: { modelVersion?: string; sessionPairId?: string }
+    metadata?: { chatWith?: string; modelVersion?: string; sessionPairId?: string }
   ) => {
     try {
       const podUrls = await getPodUrlAll(session.info.webId!, { fetch: session.fetch });
@@ -314,42 +435,36 @@ export default function ChatPage() {
         dataset = createSolidDataset();
       }
 
-      // REVIEWER FIX 3: Setiap pesan HARUS memiliki Subject IRI yang unik
+      // ✅ REVIEWER FIX 3: Setiap pesan HARUS memiliki Subject IRI yang unik
       const messageIri = `${chatFileUrl}#msg-${msg.id}`;
       
       let newThingBuilder = buildThing(createThing({ url: messageIri }))
-        // REVIEWER FIX 4: Menambahkan rdf:type yang hilang
+        // ✅ REVIEWER FIX 4: Menambahkan rdf:type yang hilang
         .addUrl('http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'http://schema.org/Message')
-        // Menggunakan schema:text untuk konten
-        .addStringNoLocale('http://schema.org/text', msg.content)
-        // REVIEWER FIX 5: Menggunakan addDatetime agar otomatis memiliki datatype ^^xsd:dateTime
-        .addDatetime('http://purl.org/dc/terms/created', new Date())
-        .addStringNoLocale('http://purl.org/dc/terms/identifier', msg.id || uuidv4());
+        .addStringNoLocale(SCHEMA_INRUPT.text, msg.content)
+        // ✅ REVIEWER FIX 4: Menggunakan addDatetime agar otomatis memiliki datatype ^^xsd:dateTime
+        .addDatetime(DCTERMS.created, new Date())
+        .addStringNoLocale(DCTERMS.identifier, msg.id! || uuidv4());
 
-      // REVIEWER FIX 2: Hapus schema:about yang salah. Gunakan prov:wasAttributedTo dengan IRI yang valid.
+      // ✅ REVIEWER FIX 2: Hapus schema:about yang salah. Gunakan prov:wasAttributedTo dengan IRI yang valid.
       if (msg.role === 'user' && session.info.webId) {
         // User diatribusikan ke WebID mereka sendiri (IRI valid)
-        newThingBuilder = newThingBuilder.addUrl(
-          'http://www.w3.org/ns/prov#wasAttributedTo',
-          session.info.webId
-        );
+        newThingBuilder = newThingBuilder.addUrl('http://www.w3.org/ns/prov#wasAttributedTo', session.info.webId);
       } else if (msg.role === 'assistant' && metadata?.modelVersion) {
         // Assistant diatribusikan ke IRI Software Agent yang valid (bukan string literal)
-        // Contoh: https://openrouter.ai/google/gemini-flash-1.5
         const cleanModel = metadata.modelVersion.replace(':', '/');
         const agentIri = `https://openrouter.ai/${cleanModel}`;
-        
-        newThingBuilder = newThingBuilder.addUrl(
-          'http://www.w3.org/ns/prov#wasAttributedTo',
-          agentIri
-        );
+        newThingBuilder = newThingBuilder.addUrl('http://www.w3.org/ns/prov#wasAttributedTo', agentIri);
       }
 
+      if (metadata?.chatWith) {
+        newThingBuilder = newThingBuilder.addStringNoLocale('https://schema.org/chatWith', metadata.chatWith);
+      }
+      if (metadata?.modelVersion) {
+        newThingBuilder = newThingBuilder.addStringNoLocale('https://schema.org/modelVersion', metadata.modelVersion);
+      }
       if (metadata?.sessionPairId) {
-        newThingBuilder = newThingBuilder.addStringNoLocale(
-          'http://schema.org/isPartOf', 
-          metadata.sessionPairId
-        );
+        newThingBuilder = newThingBuilder.addStringNoLocale('https://schema.org/sessionPairId', metadata.sessionPairId);
       }
 
       const newThing = newThingBuilder.build();
@@ -357,7 +472,7 @@ export default function ChatPage() {
       await saveSolidDatasetAt(chatFileUrl, updatedDataset, { fetch: session.fetch });
 
     } catch (err) {
-      console.error('❌ Error saving message to Pod:', err);
+      console.error('❌ Error saving message:', err);
     }
   };
 
@@ -380,40 +495,10 @@ export default function ChatPage() {
       <Flex flex="1" flexDir="column" overflowY="auto" mb={4} p={4} bg="gray.50" borderRadius="md">
         {sessionMessages.map((msg, index) => (
           <Flex key={msg.id || index} justify={msg.role === 'user' ? 'flex-end' : 'flex-start'} mb={4}>
-            <Flex 
-              maxW="80%" 
-              bg={msg.role === 'user' ? 'teal.100' : 'white'} 
-              p={4} 
-              borderRadius="lg" 
-              boxShadow="sm" 
-              alignItems={msg.role === 'assistant' ? 'flex-start' : 'center'}
-            >
-              {msg.role === 'assistant' && <Avatar size="sm" name="Assistant" bg="teal.500" mr={3} mt={1} />}
-              
-              {/* ✅ RENDER MARKDOWN untuk Assistant */}
-              {msg.role === 'assistant' ? (
-                <Box 
-                  className="markdown-content" 
-                  fontSize="sm" 
-                  lineHeight="1.6"
-                  sx={{
-                    'p': { marginBottom: '0.5em' },
-                    'pre': { background: '#f4f4f4', padding: '10px', borderRadius: '6px', overflowX: 'auto', fontSize: '0.85em', color: '#333' },
-                    'code': { background: '#f4f4f4', padding: '2px 4px', borderRadius: '4px', fontSize: '0.9em', color: '#333' },
-                    'ul, ol': { paddingLeft: '1.2em', marginBottom: '0.5em' },
-                    'li': { marginBottom: '0.25em' },
-                    'a': { color: 'teal.600', textDecoration: 'underline' }
-                  }}
-                >
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {msg.content}
-                  </ReactMarkdown>
-                </Box>
-              ) : (
-                <Text whiteSpace="pre-wrap">{msg.content}</Text>
-              )}
-
-              {msg.role === 'user' && <Avatar size="sm" name="User" bg="gray.500" ml={3} mt={1} />}
+            <Flex maxW="70%" bg={msg.role === 'user' ? 'teal.100' : 'white'} p={3} borderRadius="lg" boxShadow="sm" alignItems="center">
+              {msg.role === 'assistant' && <Avatar size="sm" name="Assistant" bg="teal.500" mr={2} />}
+              <Text>{msg.content}</Text>
+              {msg.role === 'user' && <Avatar size="sm" name="User" bg="gray.500" ml={2} />}
             </Flex>
           </Flex>
         ))}
@@ -427,8 +512,15 @@ export default function ChatPage() {
         )}
         <div ref={messagesEndRef} />
       </Flex>
-      
-      <Flex as="form" onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} align="center" gap={2}>
+      <Flex
+        as="form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSendMessage();
+        }}
+        align="center"
+        gap={2}
+      >
         <Input
           value={inputMessage}
           onChange={(e) => setInputMessage(e.target.value)}
@@ -436,21 +528,10 @@ export default function ChatPage() {
           isDisabled={loading}
           bg="white"
         />
-        <Button type="submit" isLoading={loading} colorScheme="blue">Send</Button>
+        <Button type="submit" isLoading={loading} colorScheme="blue">
+          Send
+        </Button>
       </Flex>
-
-      <AlertDialog isOpen={showPermissionDialog} leastDestructiveRef={cancelRef} onClose={() => setShowPermissionDialog(false)}>
-        <AlertDialogOverlay>
-          <AlertDialogContent>
-            <AlertDialogHeader fontSize="lg" fontWeight="bold">Save Chat Permission</AlertDialogHeader>
-            <AlertDialogBody>Do you want to save this chat history to your private Solid Pod?</AlertDialogBody>
-            <AlertDialogFooter>
-              <Button ref={cancelRef} onClick={() => handlePermissionDecision(false)}>No</Button>
-              <Button colorScheme="blue" onClick={() => handlePermissionDecision(true)} ml={3}>Yes</Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialogOverlay>
-      </AlertDialog>
     </Box>
   );
 }
