@@ -82,7 +82,7 @@ function MainLayout({
       const { SCHEMA_INRUPT, DCTERMS } = await import('@inrupt/vocab-common-rdf');
 
       const podUrls = await getPodUrlAll(session.info.webId!, { fetch: session.fetch });
-      const chatFileUrl = `${podUrls[0]}public/llm-solid-chat/${filename}`;
+      const chatFileUrl = `${podUrls[0]}private/llm-solid-chat/${filename}`;
       const dataset = await getSolidDataset(chatFileUrl, { fetch: session.fetch });
       const things = getThingAll(dataset);
 

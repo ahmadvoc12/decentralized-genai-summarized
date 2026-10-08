@@ -91,7 +91,7 @@ export const ChatSessionProvider = ({ children }: { children: ReactNode }) => {
 
       // Pastikan URL diakhiri dengan slash '/'
       const safePodUrl = podUrl.endsWith('/') ? podUrl : `${podUrl}/`;
-      const folder = `${safePodUrl}public/llm-solid-chat/`;
+      const folder = `${safePodUrl}private/llm-solid-chat/`;
       const name = `session-${uuidv4()}.ttl`;
       const newUrl = `${folder}${name}`;
 
