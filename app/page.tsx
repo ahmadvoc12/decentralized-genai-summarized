@@ -20,8 +20,8 @@ import { RDF, SCHEMA_INRUPT, DCTERMS } from '@inrupt/vocab-common-rdf';
 import { v4 as uuidv4 } from 'uuid';
 import { asUrl } from '@inrupt/solid-client';
 import { useChatSession } from '@/contexts/ChatSessionContext';
+import MarkdownRenderer from '@/components/chat/MarkdownRenderer';
 
-// ✅ DIHAPUS: SCHEMA_ABOUT tidak lagi digunakan karena disalahgunakan untuk role (sesuai revisi reviewer)
 
 interface Message {
   id?: string;
@@ -493,20 +493,70 @@ export default function ChatPage() {
   return (
     <Box maxW="4xl" mx="auto" py={10} px={4} h="100vh" display="flex" flexDir="column">
       <Flex flex="1" flexDir="column" overflowY="auto" mb={4} p={4} bg="gray.50" borderRadius="md">
-        {sessionMessages.map((msg, index) => (
-          <Flex key={msg.id || index} justify={msg.role === 'user' ? 'flex-end' : 'flex-start'} mb={4}>
-            <Flex maxW="70%" bg={msg.role === 'user' ? 'teal.100' : 'white'} p={3} borderRadius="lg" boxShadow="sm" alignItems="center">
-              {msg.role === 'assistant' && <Avatar size="sm" name="Assistant" bg="teal.500" mr={2} />}
-              <Text>{msg.content}</Text>
-              {msg.role === 'user' && <Avatar size="sm" name="User" bg="gray.500" ml={2} />}
+        {sessionMessages.map((msg, index) => {
+          const isUser = msg.role === 'user';
+          return (
+            <Flex
+              key={msg.id || index}
+              justify={isUser ? 'flex-end' : 'flex-start'}
+              mb={4}
+            >
+              <Flex
+                maxW={{ base: '85%', md: '75%' }}
+                bg={isUser ? 'teal.100' : 'white'}
+                color="gray.800"
+                p={3.5}
+                borderRadius="lg"
+                boxShadow="sm"
+                alignItems="flex-start"
+              >
+                {!isUser && (
+                  <Avatar
+                    size="sm"
+                    name="Assistant"
+                    bg="teal.500"
+                    color="white"
+                    mr={2.5}
+                    mt="2px"
+                    flexShrink={0}
+                  />
+                )}
+                <Box flex="1" overflowX="auto">
+                  {isUser ? (
+                    <Text whiteSpace="pre-wrap" fontSize="sm" lineHeight="1.6">
+                      {msg.content}
+                    </Text>
+                  ) : msg.content ? (
+                    <MarkdownRenderer content={msg.content} />
+                  ) : (
+                    <Flex align="center" gap={2} py={1}>
+                      <Spinner size="xs" color="teal.500" />
+                      <Text fontSize="xs" color="gray.500">
+                        Mengetik...
+                      </Text>
+                    </Flex>
+                  )}
+                </Box>
+                {isUser && (
+                  <Avatar
+                    size="sm"
+                    name="User"
+                    bg="gray.500"
+                    color="white"
+                    ml={2.5}
+                    mt="2px"
+                    flexShrink={0}
+                  />
+                )}
+              </Flex>
             </Flex>
-          </Flex>
-        ))}
-        {loading && (
+          );
+        })}
+        {loading && sessionMessages[sessionMessages.length - 1]?.role !== 'assistant' && (
           <Flex justify="flex-start" mb={4}>
-            <Flex maxW="70%" bg="white" p={3} borderRadius="lg" boxShadow="sm">
+            <Flex maxW="70%" bg="white" p={3} borderRadius="lg" boxShadow="sm" alignItems="center">
               <Avatar size="sm" name="Assistant" bg="teal.500" mr={2} />
-              <Spinner />
+              <Spinner size="sm" color="teal.500" />
             </Flex>
           </Flex>
         )}
